@@ -1,6 +1,6 @@
 # data path
 train_path: ../dataset/train.json
-dev_path: ../dataset/dev.json
+dev_path: ../dataset/valid.json
 test_path: ../dataset/test.json
 
 # pretrained encoder

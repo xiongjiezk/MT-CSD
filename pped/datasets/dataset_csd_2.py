@@ -5,15 +5,7 @@
 
 """Template-based dialogue stance dataset.
 
-This dataset follows the baseline's target-aware template style, while keeping
-our extra fields for latent evidence modeling:
-- all_labels
-- last_speaker_sentences
-- last_speaker_sentences_labels
-
-The goal is to make utterance/target interaction explicit at the input level,
-then let the model learn a latent evidence distribution over candidate history
-sentences.
+This dataset prepares target-aware dialogue examples for the stance model.
 """
 
 from collections import Counter
@@ -90,9 +82,6 @@ class DialogueStanceDataset(Dataset):
             sentences = dialogue["sentences"]
             all_labels = dialogue["all_labels"]
             last_label = dialogue["label"]
-            last_speaker_sentences = dialogue.get("last_speaker_sentences", [])
-            last_speaker_sentences_labels = dialogue.get("last_speaker_sentences_labels", [])
-
             if len(all_labels) != len(sentences):
                 raise ValueError(
                     f"all_labels length ({len(all_labels)}) must match sentences length ({len(sentences)}) for dialogue id={dialogue.get('id', dialogue.get('doc_id'))}"
@@ -102,21 +91,10 @@ class DialogueStanceDataset(Dataset):
                     f"sentences length ({len(sentences)}) must match speakers length ({len(speakers)}) for dialogue id={dialogue.get('id', dialogue.get('doc_id'))}"
                 )
 
-            if len(last_speaker_sentences) != len(last_speaker_sentences_labels):
-                raise ValueError(
-                    f"last_speaker_sentences length ({len(last_speaker_sentences)}) must match last_speaker_sentences_labels length ({len(last_speaker_sentences_labels)}) for dialogue id={dialogue.get('id', dialogue.get('doc_id'))}"
-                )
-
             utterance_inputs = []
             for spk, utt in zip(speakers, sentences):
                 text = self._build_utterance_text(spk, utt, target, target_type)
                 utterance_inputs.append(self._encode_text(text))
-
-            last_speaker_sentences_inputs = []
-            last_speaker = speakers[-1] if len(speakers) > 0 else ""
-            for utt in last_speaker_sentences:
-                text = self._build_utterance_text(last_speaker, utt, target, target_type)
-                last_speaker_sentences_inputs.append(self._encode_text(text))
 
             target_inputs = self._encode_text(f"[CLS]{target}[SEP]")
 
@@ -131,11 +109,6 @@ class DialogueStanceDataset(Dataset):
                     "all_labels": all_labels,
                     "target": target,
                     "target_type": target_type,
-                    "last_speaker_sentences_input_ids": [x["input_ids"] for x in last_speaker_sentences_inputs],
-                    "last_speaker_sentences_attention_mask": [x["attention_mask"] for x in last_speaker_sentences_inputs],
-                    "last_speaker_sentences_token_type_ids": [x["token_type_ids"] for x in last_speaker_sentences_inputs],
-                    "last_speaker_sentences_labels": last_speaker_sentences_labels,
-                    "last_speaker_sentences_count": len(last_speaker_sentences_inputs),
                     "target_input_ids": target_inputs["input_ids"],
                     "target_attention_mask": target_inputs["attention_mask"],
                     "target_token_type_ids": target_inputs["token_type_ids"],
@@ -164,11 +137,6 @@ def dialogue_collate_fn(batch):
     all_labels = [b["all_labels"] for b in batch]
     targets = [b["target"] for b in batch]
     target_types = [b.get("target_type", "") for b in batch]
-    last_speaker_sentences_input_ids = [b["last_speaker_sentences_input_ids"] for b in batch]
-    last_speaker_sentences_attention_mask = [b["last_speaker_sentences_attention_mask"] for b in batch]
-    last_speaker_sentences_token_type_ids = [b["last_speaker_sentences_token_type_ids"] for b in batch]
-    last_speaker_sentences_labels = [b["last_speaker_sentences_labels"] for b in batch]
-    last_speaker_sentences_count = [b["last_speaker_sentences_count"] for b in batch]
     doc_ids = [b["doc_id"] for b in batch]
     target_input_ids = [b["target_input_ids"] for b in batch]
     target_attention_mask = [b["target_attention_mask"] for b in batch]
@@ -181,36 +149,12 @@ def dialogue_collate_fn(batch):
         dia_idx.append([st, st + num])
         st += num
 
-    user_history_length = [len(sample) for sample in last_speaker_sentences_input_ids]
-    user_history_idx = []
-    st = 0
-    for num in user_history_length:
-        user_history_idx.append([st, st + num])
-        st += num
-
     max_lens = max((len(w) for sublist in input_ids for w in sublist), default=1)
     max_target_len = max((len(w) for w in target_input_ids), default=1)
-    max_last_speaker_sentences_len = max((len(w) for sublist in last_speaker_sentences_input_ids for w in sublist), default=1)
 
     input_ids_flat = [_pad_sequence(seq, max_lens, pad_value=0) for sample in input_ids for seq in sample]
     attention_mask_flat = [_pad_sequence(seq, max_lens, pad_value=0) for sample in attention_mask for seq in sample]
     token_type_ids_flat = [_pad_sequence(seq, max_lens, pad_value=0) for sample in token_type_ids for seq in sample]
-
-    last_speaker_sentences_input_ids_flat = [
-        _pad_sequence(seq, max_last_speaker_sentences_len, pad_value=0)
-        for sample in last_speaker_sentences_input_ids
-        for seq in sample
-    ]
-    last_speaker_sentences_attention_mask_flat = [
-        _pad_sequence(seq, max_last_speaker_sentences_len, pad_value=0)
-        for sample in last_speaker_sentences_attention_mask
-        for seq in sample
-    ]
-    last_speaker_sentences_token_type_ids_flat = [
-        _pad_sequence(seq, max_last_speaker_sentences_len, pad_value=0)
-        for sample in last_speaker_sentences_token_type_ids
-        for seq in sample
-    ]
 
     target_input_ids_pad = [_pad_sequence(seq, max_target_len, pad_value=0) for seq in target_input_ids]
     target_attention_mask_pad = [_pad_sequence(seq, max_target_len, pad_value=0) for seq in target_attention_mask]
@@ -225,15 +169,6 @@ def dialogue_collate_fn(batch):
         attention_mask_tensor = torch.tensor(attention_mask_flat, dtype=torch.long)
         token_type_ids_tensor = torch.tensor(token_type_ids_flat, dtype=torch.long)
 
-    if len(last_speaker_sentences_input_ids_flat) == 0:
-        last_speaker_sentences_input_ids_tensor = torch.zeros((0, max_last_speaker_sentences_len), dtype=torch.long)
-        last_speaker_sentences_attention_mask_tensor = torch.zeros((0, max_last_speaker_sentences_len), dtype=torch.long)
-        last_speaker_sentences_token_type_ids_tensor = torch.zeros((0, max_last_speaker_sentences_len), dtype=torch.long)
-    else:
-        last_speaker_sentences_input_ids_tensor = torch.tensor(last_speaker_sentences_input_ids_flat, dtype=torch.long)
-        last_speaker_sentences_attention_mask_tensor = torch.tensor(last_speaker_sentences_attention_mask_flat, dtype=torch.long)
-        last_speaker_sentences_token_type_ids_tensor = torch.tensor(last_speaker_sentences_token_type_ids_flat, dtype=torch.long)
-
     return {
         "input_ids": input_ids_tensor,
         "attention_mask": attention_mask_tensor,
@@ -242,14 +177,8 @@ def dialogue_collate_fn(batch):
         "label": torch.tensor(labels, dtype=torch.long),
         "all_labels": all_labels,
         "dia_idx": dia_idx,
-        "user_history_idx": user_history_idx,
         "target": targets,
         "target_type": target_types,
-        "last_speaker_sentences_input_ids": last_speaker_sentences_input_ids_tensor,
-        "last_speaker_sentences_attention_mask": last_speaker_sentences_attention_mask_tensor,
-        "last_speaker_sentences_token_type_ids": last_speaker_sentences_token_type_ids_tensor,
-        "last_speaker_sentences_labels": last_speaker_sentences_labels,
-        "last_speaker_sentences_count": torch.tensor(last_speaker_sentences_count, dtype=torch.long),
         "target_input_ids": torch.tensor(target_input_ids_pad, dtype=torch.long),
         "target_attention_mask": torch.tensor(target_attention_mask_pad, dtype=torch.long),
         "target_token_type_ids": torch.tensor(target_token_type_ids_pad, dtype=torch.long),

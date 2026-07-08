@@ -142,13 +142,13 @@ class SITCL(nn.Module):
         )
 
         self.main_classifier_prior = nn.Sequential(
-            nn.Linear(self.hidden_size * 6, self.hidden_size),
+            nn.Linear(self.hidden_size * 4, self.hidden_size),
             nn.GELU(),
             nn.Dropout(self.dropout),
             nn.Linear(self.hidden_size, config.num_classes),
         )
         self.main_classifier_post = nn.Sequential(
-            nn.Linear(self.hidden_size * 6, self.hidden_size),
+            nn.Linear(self.hidden_size * 4, self.hidden_size),
             nn.GELU(),
             nn.Dropout(self.dropout),
             nn.Linear(self.hidden_size, config.num_classes),
@@ -420,7 +420,7 @@ class SITCL(nn.Module):
             "dialog_prior_prob_max": [],
             "user_prior_prob_max": [],
             "dialog_posterior_prob_max": [],
-            "user_posterior_prob_max": [],
+
             "prior_pool_norm": [],
             "posterior_pool_norm": [],
             "target_norm": [],
@@ -503,40 +503,25 @@ class SITCL(nn.Module):
         target_type = kwargs.get("target_type", [""] * len(dia_idx))
         targets = kwargs["target"]
 
-        last_speaker_sentences_input_ids = kwargs["last_speaker_sentences_input_ids"]
-        last_speaker_sentences_attention_mask = kwargs["last_speaker_sentences_attention_mask"]
-        last_speaker_sentences_token_type_ids = kwargs["last_speaker_sentences_token_type_ids"]
-        last_speaker_sentences_labels = kwargs["last_speaker_sentences_labels"]
-        # last_speaker_sentences_count = kwargs["last_speaker_sentences_count"]
-        user_history_idx = kwargs["user_history_idx"]
-
         utter_repr = self.encode_utterances(input_ids, attention_mask, token_type_ids)
         target_repr_batch = self.encode_utterances(target_input_ids, target_attention_mask, target_token_type_ids)
         type_ids = self._target_type_to_id(target_type)
         type_emb = self.target_type_emb(torch.tensor(type_ids, device=target_repr_batch.device))
         target_cond = target_repr_batch + type_emb
-        user_utter_repr = self.encode_utterances(last_speaker_sentences_input_ids, last_speaker_sentences_attention_mask, last_speaker_sentences_token_type_ids)
 
         final_reprs = []
         H_final = []
-        contrastive_weights = []
         posterior_kl_dialog_sum = torch.tensor(0.0, device=utter_repr.device)
-        posterior_kl_user_sum = torch.tensor(0.0, device=utter_repr.device)
         posterior_ce_loss_sum = torch.tensor(0.0, device=utter_repr.device)
         posterior_count = 0
         prior_pool_norms = []
         posterior_pool_norms = []
         dialog_prior_prob_max_list = []
-        user_prior_prob_max_list = []
         dialog_posterior_prob_max_list = []
-        user_posterior_prob_max_list = []
         history_lens = []
 
-        # 取出分类器最后一层的权重作为标签的全局隐空间锚点
-        # class_proto = self.main_classifier[-1].weight.detach()
-
-        for i, ((dia_st, dia_ed), (user_st, user_ed)) in enumerate(zip(dia_idx, user_history_idx)):
-            u = utter_repr[dia_st:dia_ed]  # (L, D)
+        for i, (dia_st, dia_ed) in enumerate(dia_idx):
+            u = utter_repr[dia_st:dia_ed]
             causal_u, _ = self.causal_encoder(u)
             H_final.append(causal_u)
             final_utt = causal_u[-1]
@@ -548,98 +533,50 @@ class SITCL(nn.Module):
             query_speaker = speakers_i[-1]
             dialog_history = history_repr
             dialog_speakers = speakers_i[:-1]
-            user_history = user_utter_repr[user_st:user_ed]
-            user_speakers = query_speaker.repeat(user_history.size(0)) if user_history.size(0) > 0 else torch.empty(0, device=u.device, dtype=torch.long)
 
-            # Prior selectors: used for inference and main classification
-            dialog_prior_query = final_utt
-            dialog_prior_prob = self.dialog_prior_selector(dialog_prior_query, dialog_history, query_speaker, dialog_speakers, current_target)
+            dialog_prior_prob = self.dialog_prior_selector(final_utt, dialog_history, query_speaker, dialog_speakers, current_target)
             dialog_pool = self._safe_pool(dialog_prior_prob, dialog_history) if dialog_history.size(0) > 0 else torch.zeros_like(final_utt)
 
-            user_prior_query = final_utt
-            user_prior_prob = self.user_prior_selector(user_prior_query, user_history, query_speaker, user_speakers, current_target)
-            user_pool = self._safe_pool(user_prior_prob, user_history) if user_history.size(0) > 0 else torch.zeros_like(final_utt)
-
-            prior_pool_norms.append((dialog_pool.norm(p=2) + user_pool.norm(p=2)).detach().item())
+            prior_pool_norms.append(dialog_pool.norm(p=2).detach().item())
             dialog_prior_prob_max = dialog_prior_prob.max().detach().item() if dialog_prior_prob.numel() > 0 else 0.0
-            user_prior_prob_max = user_prior_prob.max().detach().item() if user_prior_prob.numel() > 0 else 0.0
             dialog_prior_prob_max_list.append(dialog_prior_prob_max)
-            user_prior_prob_max_list.append(user_prior_prob_max)
-            history_lens.append(float(dialog_history.size(0) + user_history.size(0)))
+            history_lens.append(float(dialog_history.size(0)))
 
             interaction_dialog = torch.abs(final_utt - dialog_pool)
-            interaction_user = torch.abs(final_utt - user_pool)
             final_repr_prior = torch.cat([
                 final_utt,
                 dialog_pool,
-                user_pool,
                 interaction_dialog,
-                interaction_user,
                 current_target,
             ], dim=-1)
-            
+
             final_reprs.append(final_repr_prior)
 
-            # Posterior selectors: teacher guidance with label-augmented query/history
-            # if self.training and all_labels is not None and history_len > 0:
             if all_labels is not None and history_len > 0:
                 final_label = int(label[i].item())
                 hist_labels = torch.tensor(all_labels[i][:-1], device=u.device, dtype=torch.long)
-
                 hist_label_proto = self.label_emb(hist_labels)
                 query_label_proto = self.label_emb(torch.tensor(final_label, device=u.device, dtype=torch.long))
-
                 posterior_query = self.posterior_query_proj(torch.cat([final_utt, query_label_proto], dim=-1))
-
                 dialog_history_post = dialog_history + hist_label_proto if dialog_history.size(0) > 0 else dialog_history
-                user_label_u = None
-                if user_history.size(0) > 0 and len(last_speaker_sentences_labels) > i:
-                    user_u_lbls = last_speaker_sentences_labels[i]
-                    if len(user_u_lbls) == user_history.size(0):
-                        user_u_lbls_tensor = torch.tensor(user_u_lbls, device=u.device, dtype=torch.long)
-                        user_label_u = self.label_emb(user_u_lbls_tensor)
-                user_history_post = user_history + user_label_u if user_history.size(0) > 0 and user_label_u is not None else user_history
-
                 dialog_posterior_prob = self.dialog_posterior_selector(posterior_query, dialog_history_post, query_speaker, dialog_speakers, current_target)
-                user_posterior_prob = self.user_posterior_selector(posterior_query, user_history_post, query_speaker, user_speakers, current_target)
-                dialog_weight = torch.cat([dialog_posterior_prob, torch.ones(1, device=u.device, dtype=dialog_posterior_prob.dtype if dialog_posterior_prob.numel() > 0 else torch.float32)])
-                contrastive_weights.append(dialog_weight)
-
                 if dialog_prior_prob.numel() > 0 and dialog_posterior_prob.numel() > 0:
-                    dialog_posterior_prob_teacher = dialog_posterior_prob.detach()
-                    # dialog_posterior_prob_teacher = dialog_posterior_prob
-                    kl_dialog = torch.sum(dialog_posterior_prob_teacher * (
-                        torch.log(dialog_posterior_prob_teacher.clamp_min(1e-12)) - torch.log(dialog_prior_prob.clamp_min(1e-12))
+                    kl_dialog = torch.sum(dialog_posterior_prob.detach() * (
+                        torch.log(dialog_posterior_prob.detach().clamp_min(1e-12)) - torch.log(dialog_prior_prob.clamp_min(1e-12))
                     ))
                     posterior_kl_dialog_sum = posterior_kl_dialog_sum + kl_dialog
-
-                if user_prior_prob.numel() > 0 and user_posterior_prob.numel() > 0:
-                    user_posterior_prob_teacher = user_posterior_prob.detach()
-                    # user_posterior_prob_teacher = user_posterior_prob
-                    kl_user = torch.sum(user_posterior_prob_teacher * (
-                        torch.log(user_posterior_prob_teacher.clamp_min(1e-12)) - torch.log(user_prior_prob.clamp_min(1e-12))
-                    ))
-                    posterior_kl_user_sum = posterior_kl_user_sum + kl_user
-
                 posterior_count += 1
                 dialog_posterior_prob_max = dialog_posterior_prob.max().detach().item() if dialog_posterior_prob.numel() > 0 else 0.0
-                user_posterior_prob_max = user_posterior_prob.max().detach().item() if user_posterior_prob.numel() > 0 else 0.0
                 dialog_posterior_prob_max_list.append(dialog_posterior_prob_max)
-                user_posterior_prob_max_list.append(user_posterior_prob_max)
 
                 dialog_pool_post = self._safe_pool(dialog_posterior_prob, dialog_history_post) if dialog_history_post.size(0) > 0 else torch.zeros_like(final_utt)
-                user_pool_post = self._safe_pool(user_posterior_prob, user_history_post) if user_history_post.size(0) > 0 else torch.zeros_like(final_utt)
-
-                posterior_pool_norms.append((dialog_pool_post.norm(p=2) + user_pool_post.norm(p=2)).detach().item())
+                posterior_pool_norms.append(dialog_pool_post.norm(p=2).detach().item())
 
                 interaction_dialog_post = torch.abs(final_utt - dialog_pool_post)
-                interaction_user_post = torch.abs(final_utt - user_pool_post)
                 final_repr_post = torch.cat([
                     final_utt,
                     dialog_pool_post,
-                    user_pool_post,
                     interaction_dialog_post,
-                    interaction_user_post,
                     current_target,
                 ], dim=-1)
 
@@ -647,25 +584,20 @@ class SITCL(nn.Module):
                 logits_post = self.main_classifier_post(final_repr_post.unsqueeze(0)).squeeze(0)
                 ce_loss_post = self.criterion(logits_post.unsqueeze(0), label[i].unsqueeze(0))
                 posterior_ce_loss_sum += ce_loss_post
-            else:
-                contrastive_weights.append(torch.cat([dialog_prior_prob, torch.ones(1, device=u.device, dtype=dialog_prior_prob.dtype if dialog_prior_prob.numel() > 0 else torch.float32)]))
-
+            
         final_reprs = torch.stack(final_reprs, dim=0)
         logits = self.main_classifier_prior(final_reprs)
         ce_loss = self.criterion(logits, label)
 
         posterior_kl_dialog = posterior_kl_dialog_sum / max(posterior_count, 1)
-        posterior_kl_user = posterior_kl_user_sum / max(posterior_count, 1)
         posterior_ce_loss = posterior_ce_loss_sum / max(posterior_count, 1)
         target_contrastive_loss = self._compute_supcon_loss(H_final, targets, all_labels)
-        # target_contrastive_loss = self._weighted_compute_supcon_loss(H_final, targets, all_labels, contrastive_weights)
-        distill_loss = posterior_kl_dialog + posterior_kl_user
+        distill_loss = posterior_kl_dialog
         alpha_t = self._get_alpha()
 
         loss = (
             ce_loss
             + self.lambda_distill * distill_loss
-            # + self.alpha * (1.0 - ratio) * target_contrastive_loss
             + alpha_t * target_contrastive_loss
             + self.posterior_ce_weight * posterior_ce_loss
         )
@@ -683,9 +615,7 @@ class SITCL(nn.Module):
             self._cache_scalar("posterior_count", float(posterior_count))
             self._cache_scalar("history_len", sum(history_lens) / len(history_lens) if len(history_lens) > 0 else 0.0)
             self._cache_scalar("dialog_prior_prob_max", sum(dialog_prior_prob_max_list) / len(dialog_prior_prob_max_list) if len(dialog_prior_prob_max_list) > 0 else 0.0)
-            self._cache_scalar("user_prior_prob_max", sum(user_prior_prob_max_list) / len(user_prior_prob_max_list) if len(user_prior_prob_max_list) > 0 else 0.0)
             self._cache_scalar("dialog_posterior_prob_max", sum(dialog_posterior_prob_max_list) / len(dialog_posterior_prob_max_list) if len(dialog_posterior_prob_max_list) > 0 else 0.0)
-            self._cache_scalar("user_posterior_prob_max", sum(user_posterior_prob_max_list) / len(user_posterior_prob_max_list) if len(user_posterior_prob_max_list) > 0 else 0.0)
             self._cache_scalar("prior_pool_norm", sum(prior_pool_norms) / len(prior_pool_norms) if len(prior_pool_norms) > 0 else 0.0)
             self._cache_scalar("posterior_pool_norm", sum(posterior_pool_norms) / len(posterior_pool_norms) if len(posterior_pool_norms) > 0 else 0.0)
             self._cache_scalar("target_norm", target_cond.norm(p=2, dim=-1).mean().item())
