@@ -1,0 +1,73 @@
+[
+    {
+      "id": 0,
+      "target": "上海迪士尼乐园禁止携带食物入园",
+      "target_type": "n",
+      "sentences": [
+        "开始也不能理解 后来发现不让带吃的 园区里真的超干净"
+      ],
+      "speakers": [
+        0
+      ],
+      "label": 0,
+      "all_labels": [
+        0
+      ],
+      "last_speaker_sentences": [],
+      "last_speaker_sentences_labels": []
+    },
+    {
+      "id": 1,
+      "target": "上海迪士尼乐园禁止携带食物入园",
+      "target_type": "n",
+      "sentences": [
+        "开始也不能理解 后来发现不让带吃的 园区里真的超干净",
+        "说的好像园区里没有卖吃的一样。干不干净和准不准带吃的有什么关系？"
+      ],
+      "speakers": [
+        0,
+        1
+      ],
+      "label": 1,
+      "all_labels": [
+        0,
+        1
+      ],
+      "last_speaker_sentences": [
+        "那我也支持你吧！[哈哈]",
+        "懂了，曲线救国。",
+        "明令禁止生火，大家不会反对的。",
+        "所以是曲线救国？[允悲]"
+      ],
+      "last_speaker_sentences_labels": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "target": "上海迪士尼乐园禁止携带食物入园",
+      "target_type": "n",
+      "sentences": [
+        "开始也不能理解 后来发现不让带吃的 园区里真的超干净",
+        "说的好像园区里没有卖吃的一样。干不干净和准不准带吃的有什么关系？",
+        "说的好!支持你"
+      ],
+      "speakers": [
+        0,
+        1,
+        14
+      ],
+      "label": 1,
+      "all_labels": [
+        0,
+        1,
+        1
+      ],
+      "last_speaker_sentences": [],
+      "last_speaker_sentences_labels": []
+    }
+]
+  

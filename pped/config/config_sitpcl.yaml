@@ -1,0 +1,38 @@
+# data path
+train_path: ../dataset/train.json
+dev_path: ../dataset/dev.json
+test_path: ../dataset/test.json
+
+# pretrained encoder
+bert_dir: /home/xiongjie/data/models/bert-base-uncased/
+
+# run metadata
+model_type: SITCL_12
+result_root: ./result
+cuda_index: 0
+seed: 17
+debug: false
+time: ""
+
+# training parameter
+epoch_size: 20
+batchsize: 32
+patience: 10
+max_grad_norm: 1.0
+gradient_accumulation_steps: 1
+adam_epsilon: 1e-8
+warmup_proportion: 0.2
+
+# optimizer / model hyperparameters
+bert_lr: 2.0e-5
+other_lr: 2.0e-5
+weight_decay: 1.0e-5
+hidden_size: 768
+num_classes: 3
+num_heads: 4
+alpha: 1
+tau: 0.05
+lambda_distill: 1
+posterior_ce_weight: 1
+selector_tau: 0.2
+dropout: 0.1
