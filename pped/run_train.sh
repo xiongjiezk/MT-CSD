@@ -32,9 +32,9 @@ PY
 )
 
 if [ "${nproc}" -le 1 ]; then
-    cmd=(python main_12.py "${config_file}")
+    cmd=(python main_12_qwen_1.py "${config_file}")
 else
-    cmd=(torchrun --standalone --nproc_per_node="${nproc}" main_12.py "${config_file}")
+    cmd=(torchrun --standalone --nproc_per_node="${nproc}" main_12_qwen_1.py "${config_file}")
 fi
 
 setsid nohup "${cmd[@]}" > "${logfile}" 2>&1 < /dev/null &
