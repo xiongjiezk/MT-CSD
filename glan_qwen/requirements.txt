@@ -1,0 +1,6 @@
+numpy>=1.24
+torch>=2.1
+scikit-learn>=1.3
+PyYAML>=6.0
+# Only needed when building the independent target feature store:
+transformers>=4.51

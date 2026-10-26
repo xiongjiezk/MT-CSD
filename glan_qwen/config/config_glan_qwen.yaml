@@ -1,0 +1,42 @@
+# 所有相对路径均相对于本 YAML 所在目录。修改特征路径后直接运行 train.py。
+train_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/train_data.json
+dev_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/dev_data.json
+test_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/test_data.json
+
+# 必须改为与 PPED 实验相同的 ZS-CSD 冻结 Qwen 特征缓存。
+train_embedding_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/qwen3_embedding_8b_target_final/train.npy
+dev_embedding_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/qwen3_embedding_8b_target_final/dev.npy
+test_embedding_path: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/qwen3_embedding_8b_target_final/test.npy
+sentence_csv: ''
+target_store: /home/xiongjie/data/csd/data/raw_with_all_labels_v3/qwen3_embedding_8b_target_final/targets.npz
+# 若使用逐 split 特征，清空 sentence_csv；ids 默认由特征文件名推导。
+train_ids_path: ''
+dev_ids_path: ''
+test_ids_path: ''
+
+model_type: GLAN_Qwen
+result_root: ../result
+time: ''  # 留空自动生成运行时间；固定值不可与已有运行重复。
+hidden_size: 256
+hop: 3
+lambdaa: 0.2
+dropout: 0.2
+other_lr: 0.0003
+weight_decay: 0.0001
+batchsize: 64
+eval_batchsize: 64
+epoch_size: 30
+patience: 10
+max_grad_norm: 1.0
+seed: 123
+device: auto
+cuda_index: 0
+
+# build_targets.py 从本配置读取上述三份 JSON、target_store 和设备设置。
+model_dir: /home/xiongjie/data/models/qwen3-embedding-8b
+embedding_batchsize: 8
+embedding_max_length: 512
+embedding_dtype: bf16
+embedding_device_map: none
+embedding_normalize: true
+trust_remote_code: true
